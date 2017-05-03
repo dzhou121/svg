@@ -5,13 +5,12 @@ import (
 	"strconv"
 
 	mt "github.com/rustyoz/Mtransform"
-	gl "github.com/rustyoz/genericlexer"
 )
 
-func parseNumber(i gl.Item) (float64, error) {
+func parseNumber(i Item) (float64, error) {
 	var n float64
 	var ok error
-	if i.Type == gl.ItemNumber {
+	if i.Type == ItemNumber {
 		n, ok = strconv.ParseFloat(i.Value, 64)
 		if ok != nil {
 			return n, fmt.Errorf("Error passing number %s", ok)
@@ -20,13 +19,13 @@ func parseNumber(i gl.Item) (float64, error) {
 	return n, nil
 }
 
-func parseTuple(l *gl.Lexer) (Tuple, error) {
+func parseTuple(l *Lexer) (Tuple, error) {
 	t := Tuple{}
 
 	l.ConsumeWhiteSpace()
 
 	ni := l.NextItem()
-	if ni.Type == gl.ItemNumber {
+	if ni.Type == ItemNumber {
 		n, ok := strconv.ParseFloat(ni.Value, 64)
 		if ok != nil {
 			return t, fmt.Errorf("Error passing number %s", ok)
@@ -36,11 +35,11 @@ func parseTuple(l *gl.Lexer) (Tuple, error) {
 		return t, fmt.Errorf("Error passing Tuple expected Number got %v", ni)
 	}
 
-	if l.PeekItem().Type == gl.ItemWSP || l.PeekItem().Type == gl.ItemComma {
+	if l.PeekItem().Type == ItemWSP || l.PeekItem().Type == ItemComma {
 		l.NextItem()
 	}
 	ni = l.NextItem()
-	if ni.Type == gl.ItemNumber {
+	if ni.Type == ItemNumber {
 		n, ok := strconv.ParseFloat(ni.Value, 64)
 		if ok != nil {
 			return t, fmt.Errorf("Error passing Number %s", ok)
@@ -55,13 +54,13 @@ func parseTuple(l *gl.Lexer) (Tuple, error) {
 
 func parseTransform(tstring string) (mt.Transform, error) {
 	var tm mt.Transform
-	lexer, _ := gl.Lex("tlexer", tstring)
+	lexer, _ := Lex("tlexer", tstring)
 	for {
 		i := lexer.NextItem()
 		switch i.Type {
-		case gl.ItemEOS:
+		case ItemEOS:
 			break
-		case gl.ItemWord:
+		case ItemWord:
 			switch i.Value {
 			case "matrix":
 				err := parseMatrix(lexer, &tm)
@@ -74,19 +73,19 @@ func parseTransform(tstring string) (mt.Transform, error) {
 	}
 }
 
-func parseMatrix(l *gl.Lexer, t *mt.Transform) error {
+func parseMatrix(l *Lexer, t *mt.Transform) error {
 	i := l.NextItem()
-	if i.Type != gl.ItemParan {
+	if i.Type != ItemParan {
 		return fmt.Errorf("Error Parsing Transform Matrix: Expected Opening Parantheses")
 	}
 	var ncount int
 	for {
 		if ncount > 0 {
-			for l.PeekItem().Type == gl.ItemComma || l.PeekItem().Type == gl.ItemWSP {
+			for l.PeekItem().Type == ItemComma || l.PeekItem().Type == ItemWSP {
 				l.NextItem()
 			}
 		}
-		if l.PeekItem().Type != gl.ItemNumber {
+		if l.PeekItem().Type != ItemNumber {
 			return fmt.Errorf("Error Parsing Transform Matrix: Expected Number got %v", l.PeekItem().String())
 		}
 		n, err := parseNumber(l.NextItem())
@@ -97,7 +96,7 @@ func parseMatrix(l *gl.Lexer, t *mt.Transform) error {
 		ncount++
 		if ncount > 5 {
 			i = l.PeekItem()
-			if i.Type != gl.ItemParan {
+			if i.Type != ItemParan {
 				return fmt.Errorf("Error Parsing Transform Matrix: Expected Closing Parantheses")
 			}
 			l.NextItem() // consume Parantheses
