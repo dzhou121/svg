@@ -4,8 +4,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"strconv"
-
-	mt "github.com/rustyoz/Mtransform"
 )
 
 type Tuple [2]float64
@@ -14,7 +12,7 @@ type Svg struct {
 	Title     string  `xml:"title"`
 	Groups    []Group `xml:"g"`
 	Name      string
-	Transform *mt.Transform
+	Transform *Transform
 	scale     float64
 }
 
@@ -26,7 +24,7 @@ type Group struct {
 	FillRule        string
 	Elements        []interface{}
 	TransformString string
-	Transform       *mt.Transform // row, column
+	Transform       *Transform // row, column
 	Parent          *Group
 	Owner           *Svg
 }
@@ -71,7 +69,7 @@ func (g *Group) UnmarshalXML(decoder *xml.Decoder, start xml.StartElement) error
 
 			switch tok.Name.Local {
 			case "g":
-				elementStruct = &Group{Parent: g, Owner: g.Owner, Transform: mt.NewTransform()}
+				elementStruct = &Group{Parent: g, Owner: g.Owner, Transform: NewTransform()}
 			case "rect":
 				elementStruct = &Rect{group: g}
 			case "path":
@@ -94,7 +92,7 @@ func (g *Group) UnmarshalXML(decoder *xml.Decoder, start xml.StartElement) error
 func ParseSvg(str string, name string, scale float64) (*Svg, error) {
 	var svg Svg
 	svg.Name = name
-	svg.Transform = mt.NewTransform()
+	svg.Transform = NewTransform()
 	if scale > 0 {
 		svg.Transform.Scale(scale, scale)
 		svg.scale = scale
@@ -108,11 +106,10 @@ func ParseSvg(str string, name string, scale float64) (*Svg, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ParseSvg Error: %v\n", err)
 	}
-	fmt.Println(len(svg.Groups))
 	for i := range svg.Groups {
 		svg.Groups[i].SetOwner(&svg)
 		if svg.Groups[i].Transform == nil {
-			svg.Groups[i].Transform = mt.NewTransform()
+			svg.Groups[i].Transform = svg.Transform
 		}
 	}
 	return &svg, nil

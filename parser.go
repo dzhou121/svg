@@ -3,8 +3,6 @@ package svg
 import (
 	"fmt"
 	"strconv"
-
-	mt "github.com/rustyoz/Mtransform"
 )
 
 func parseNumber(i Item) (float64, error) {
@@ -52,8 +50,8 @@ func parseTuple(l *Lexer) (Tuple, error) {
 	return t, nil
 }
 
-func parseTransform(tstring string) (mt.Transform, error) {
-	var tm mt.Transform
+func parseTransform(tstring string) (Transform, error) {
+	var tm Transform
 	lexer, _ := Lex("tlexer", tstring)
 	for {
 		i := lexer.NextItem()
@@ -73,7 +71,7 @@ func parseTransform(tstring string) (mt.Transform, error) {
 	}
 }
 
-func parseMatrix(l *Lexer, t *mt.Transform) error {
+func parseMatrix(l *Lexer, t *Transform) error {
 	i := l.NextItem()
 	if i.Type != ItemParan {
 		return fmt.Errorf("Error Parsing Transform Matrix: Expected Opening Parantheses")

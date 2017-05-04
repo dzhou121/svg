@@ -3,12 +3,11 @@ package svg
 import (
 	"fmt"
 	"strconv"
-
-	mt "github.com/rustyoz/Mtransform"
 )
 
+// Path is
 type Path struct {
-	Id          string `xml:"id,attr"`
+	ID          string `xml:"id,attr"`
 	D           string `xml:"d,attr"`
 	Style       string `xml:"style,attr"`
 	properties  map[string]string
@@ -21,41 +20,17 @@ type Path struct {
 const (
 	MOVETO = iota
 	LINETO
-	HLINETO
-	VLINETO
 	CURVETO
-	CLOSEPATH
 )
 
 // Command is
 type Command struct {
-	Name    int
-	Points  []Tuple
-	Numbers []float64
+	Name   int
+	Points []Tuple
 }
 
 func (c *Command) addPoint(p Tuple) {
 	c.Points = append(c.Points, p)
-}
-
-// Segment
-// A segment of a path that contains a list of connected points, its stroke Width and if the segment forms a closed loop.
-// Points are defined in world space after any matrix transformation is applied.
-type Segment struct {
-	Width  float64
-	Closed bool
-	Points [][2]float64
-}
-
-func (p Path) newSegment(start [2]float64) *Segment {
-	var s Segment
-	s.Width = p.strokeWidth * p.group.Owner.scale
-	s.Points = append(s.Points, start)
-	return &s
-}
-
-func (s *Segment) addPoint(p [2]float64) {
-	s.Points = append(s.Points, p)
 }
 
 type pathDescriptionParser struct {
@@ -66,14 +41,15 @@ type pathDescriptionParser struct {
 	tokbuf         [4]Item
 	peekcount      int
 	lasttuple      Tuple
-	transform      mt.Transform
+	transform      Transform
 	svg            *Svg
-	currentsegment *Segment
+	x2, y2         float64
+	initX, initY   float64
 }
 
 func newPathDParse() *pathDescriptionParser {
 	pdp := &pathDescriptionParser{}
-	pdp.transform = mt.Identity()
+	pdp.transform = Identity()
 	return pdp
 }
 
@@ -85,7 +61,7 @@ func (p *Path) Parse() chan *Command {
 	pdp.svg = p.group.Owner
 	pdp.transform.MultiplyWith(*p.group.Transform)
 	p.command = make(chan *Command)
-	l, _ := Lex(fmt.Sprint(p.Id), p.D)
+	l, _ := Lex(fmt.Sprint(p.ID), p.D)
 	pdp.lex = *l
 	go func() {
 		defer close(p.command)
@@ -109,25 +85,29 @@ func parseCommand(pdp *pathDescriptionParser, l *Lexer, i Item) error {
 	var err error
 	switch i.Value {
 	case "M":
-		err = parseMoveToAbs(pdp)
+		err = parseMoveTo(pdp, true)
 	case "m":
-		err = parseMoveToRel(pdp)
+		err = parseMoveTo(pdp, false)
 	case "c":
-		err = parseCurveToRel(pdp)
+		err = parseCurveTo(pdp, false)
 	case "C":
-		err = parseCurveToAbs(pdp)
+		err = parseCurveTo(pdp, true)
+	case "S":
+		err = parseSCurveTo(pdp, true)
+	case "s":
+		err = parseSCurveTo(pdp, false)
 	case "L":
-		err = parseLineToAbs(pdp)
+		err = parseLineTo(pdp, true)
 	case "l":
-		err = parseLineToRel(pdp)
+		err = parseLineTo(pdp, false)
 	case "H":
-		err = parseHLineToAbs(pdp)
+		err = parseHLineTo(pdp, true)
 	case "h":
-		err = parseHLineToRel(pdp)
+		err = parseHLineTo(pdp, false)
 	case "V":
-		err = parseVLineToAbs(pdp)
+		err = parseVLineTo(pdp, true)
 	case "v":
-		err = parseVLineToRel(pdp)
+		err = parseVLineTo(pdp, false)
 	case "Z":
 		err = parseClose(pdp)
 	case "z":
@@ -138,67 +118,69 @@ func parseCommand(pdp *pathDescriptionParser, l *Lexer, i Item) error {
 	if err != nil {
 		fmt.Println("parse command error", err)
 	}
+	if i.Value != "c" && i.Value != "C" && i.Value != "s" && i.Value != "S" {
+		pdp.x2 = pdp.x
+		pdp.y2 = pdp.y
+	}
 	return err
 
 }
 
-func parseMoveToAbs(pdp *pathDescriptionParser) error {
-	tuples, err := parseTuples(pdp, true)
+func parseMoveTo(pdp *pathDescriptionParser, abs bool) error {
+	tuples, err := parseTuples(pdp)
 	if err != nil {
 		return err
 	}
-	cmd := &Command{
-		Name: MOVETO,
+	t := tuples[0]
+	if !abs {
+		t[0] += pdp.x
+		t[1] += pdp.y
 	}
-	cmd.Points = tuples
-	pdp.x = tuples[len(tuples)-1][0]
-	pdp.y = tuples[len(tuples)-1][1]
+	pdp.x = t[0]
+	pdp.y = t[1]
+	pdp.initX, pdp.initY = t[0], t[1]
+	cmd := &Command{
+		Name:   MOVETO,
+		Points: []Tuple{pdp.transform.Apply(t)},
+	}
 	pdp.p.command <- cmd
+	if len(tuples) > 1 {
+		for i := 1; i < len(tuples); i++ {
+			t := tuples[i]
+			if !abs {
+				t[0] += pdp.x
+				t[1] += pdp.y
+			}
+			pdp.x = t[0]
+			pdp.y = t[1]
+			cmd := &Command{
+				Name:   LINETO,
+				Points: []Tuple{pdp.transform.Apply(t)},
+			}
+			pdp.p.command <- cmd
+		}
+	}
 	return nil
 }
 
-func parseLineToAbs(pdp *pathDescriptionParser) error {
-	tuples, err := parseTuples(pdp, true)
+func parseLineTo(pdp *pathDescriptionParser, abs bool) error {
+	tuples, err := parseTuples(pdp)
 	if err != nil {
 		return err
 	}
-	cmd := &Command{
-		Name: LINETO,
+	for _, t := range tuples {
+		if !abs {
+			t[0] += pdp.x
+			t[1] += pdp.y
+		}
+		pdp.x = t[0]
+		pdp.y = t[1]
+		cmd := &Command{
+			Name:   LINETO,
+			Points: []Tuple{pdp.transform.Apply(t)},
+		}
+		pdp.p.command <- cmd
 	}
-	cmd.Points = tuples
-	pdp.x = tuples[len(tuples)-1][0]
-	pdp.y = tuples[len(tuples)-1][1]
-	pdp.p.command <- cmd
-	return nil
-}
-
-func parseMoveToRel(pdp *pathDescriptionParser) error {
-	tuples, err := parseTuples(pdp, false)
-	if err != nil {
-		return err
-	}
-	cmd := &Command{
-		Name: MOVETO,
-	}
-	cmd.Points = tuples
-	pdp.x = tuples[len(tuples)-1][0]
-	pdp.y = tuples[len(tuples)-1][1]
-	pdp.p.command <- cmd
-	return nil
-}
-
-func parseLineToRel(pdp *pathDescriptionParser) error {
-	tuples, err := parseTuples(pdp, false)
-	if err != nil {
-		return err
-	}
-	cmd := &Command{
-		Name: LINETO,
-	}
-	cmd.Points = tuples
-	pdp.x = tuples[len(tuples)-1][0]
-	pdp.y = tuples[len(tuples)-1][1]
-	pdp.p.command <- cmd
 	return nil
 }
 
@@ -214,7 +196,7 @@ func parseNumbers(pdp *pathDescriptionParser) ([]float64, error) {
 	return numbers, nil
 }
 
-func parseTuples(pdp *pathDescriptionParser, abs bool) ([]Tuple, error) {
+func parseTuples(pdp *pathDescriptionParser) ([]Tuple, error) {
 	var tuples []Tuple
 	pdp.lex.ConsumeWhiteSpace()
 	for pdp.lex.PeekItem().Type == ItemNumber {
@@ -222,112 +204,132 @@ func parseTuples(pdp *pathDescriptionParser, abs bool) ([]Tuple, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !abs {
-			t[0] += pdp.x
-			t[1] += pdp.y
-		}
 		tuples = append(tuples, t)
 		pdp.lex.ConsumeWhiteSpace()
 	}
 	return tuples, nil
 }
 
-func parseHLineToAbs(pdp *pathDescriptionParser) error {
+func parseHLineTo(pdp *pathDescriptionParser, abs bool) error {
 	numbers, err := parseNumbers(pdp)
 	if err != nil {
 		return err
 	}
-	cmd := &Command{
-		Name: HLINETO,
+	for _, n := range numbers {
+		t := Tuple{}
+		t[1] = pdp.y
+		if !abs {
+			n += pdp.x
+		}
+		t[0] = n
+		pdp.x = n
+		cmd := &Command{
+			Name:   LINETO,
+			Points: []Tuple{pdp.transform.Apply(t)},
+		}
+		pdp.p.command <- cmd
 	}
-	cmd.Numbers = numbers
-	pdp.x = numbers[len(numbers)-1]
-	pdp.p.command <- cmd
 	return nil
 }
 
-func parseHLineToRel(pdp *pathDescriptionParser) error {
+func parseVLineTo(pdp *pathDescriptionParser, abs bool) error {
 	numbers, err := parseNumbers(pdp)
 	if err != nil {
 		return err
 	}
-	cmd := &Command{
-		Name: HLINETO,
+	for _, n := range numbers {
+		t := Tuple{}
+		t[0] = pdp.x
+		if !abs {
+			n += pdp.y
+		}
+		t[1] = n
+		pdp.y = n
+		cmd := &Command{
+			Name:   LINETO,
+			Points: []Tuple{pdp.transform.Apply(t)},
+		}
+		pdp.p.command <- cmd
 	}
-	for i := range numbers {
-		numbers[i] += pdp.x
-	}
-	cmd.Numbers = numbers
-	pdp.x = numbers[len(numbers)-1]
-	pdp.p.command <- cmd
-	return nil
-}
-
-func parseVLineToAbs(pdp *pathDescriptionParser) error {
-	numbers, err := parseNumbers(pdp)
-	if err != nil {
-		return err
-	}
-	cmd := &Command{
-		Name: VLINETO,
-	}
-	cmd.Numbers = numbers
-	pdp.y = numbers[len(numbers)-1]
-	pdp.p.command <- cmd
 	return nil
 }
 
 func parseClose(pdp *pathDescriptionParser) error {
-	pdp.p.command <- &Command{
-		Name: CLOSEPATH,
-	}
-	return nil
-}
-
-func parseVLineToRel(pdp *pathDescriptionParser) error {
-	numbers, err := parseNumbers(pdp)
-	if err != nil {
-		return err
-	}
+	var t Tuple
+	t[0], t[1] = pdp.initX, pdp.initY
+	pdp.x, pdp.y = pdp.initX, pdp.initY
 	cmd := &Command{
-		Name: VLINETO,
+		Name:   LINETO,
+		Points: []Tuple{pdp.transform.Apply(t)},
 	}
-	for i := range numbers {
-		numbers[i] += pdp.x
-	}
-	cmd.Numbers = numbers
-	pdp.y = numbers[len(numbers)-1]
 	pdp.p.command <- cmd
 	return nil
 }
 
-func parseCurveToRel(pdp *pathDescriptionParser) error {
-	tuples, err := parseTuples(pdp, false)
+func reflection(x, y, x2, y2 float64) Tuple {
+	t := Tuple{}
+	t[0] = x + x - x2
+	t[1] = y + y - y2
+	return t
+}
+
+func parseSCurveTo(pdp *pathDescriptionParser, abs bool) error {
+	tuples, err := parseTuples(pdp)
 	if err != nil {
 		return err
 	}
-	cmd := &Command{
-		Name: CURVETO,
+
+	for j := 0; j < len(tuples)/2; j++ {
+		if !abs {
+			for i := 2 * j; i < 2+2*j; i++ {
+				tuples[i][0] += pdp.x
+				tuples[i][1] += pdp.y
+			}
+		}
+		pdp.x2 = tuples[0+2*j][0]
+		pdp.y2 = tuples[0+2*j][1]
+		pdp.x = tuples[1+2*j][0]
+		pdp.y = tuples[1+2*j][1]
+		cmd := &Command{
+			Name: CURVETO,
+			Points: []Tuple{
+				pdp.transform.Apply(reflection(pdp.x, pdp.y, pdp.x2, pdp.y2)),
+				pdp.transform.Apply(tuples[0+2*j]),
+				pdp.transform.Apply(tuples[1+2*j]),
+			},
+		}
+		pdp.p.command <- cmd
 	}
-	cmd.Points = tuples
-	pdp.x = tuples[len(tuples)-1][0]
-	pdp.y = tuples[len(tuples)-1][1]
-	pdp.p.command <- cmd
 	return nil
 }
 
-func parseCurveToAbs(pdp *pathDescriptionParser) error {
-	tuples, err := parseTuples(pdp, true)
+func parseCurveTo(pdp *pathDescriptionParser, abs bool) error {
+	tuples, err := parseTuples(pdp)
 	if err != nil {
 		return err
 	}
-	cmd := &Command{
-		Name: CURVETO,
+	for j := 0; j < len(tuples)/3; j++ {
+		if !abs {
+			for i := 3 * j; i < 3+3*j; i++ {
+				tuples[i][0] += pdp.x
+				tuples[i][1] += pdp.y
+			}
+		}
+		pdp.x = tuples[2+3*j][0]
+		pdp.y = tuples[2+3*j][1]
+		pdp.x2 = tuples[1+3*j][0]
+		pdp.y2 = tuples[1+3*j][1]
+
+		cmd := &Command{
+			Name: CURVETO,
+			Points: []Tuple{
+				pdp.transform.Apply(tuples[0+3*j]),
+				pdp.transform.Apply(tuples[1+3*j]),
+				pdp.transform.Apply(tuples[2+3*j]),
+			},
+		}
+		pdp.p.command <- cmd
 	}
-	cmd.Points = tuples
-	pdp.x = tuples[len(tuples)-1][0]
-	pdp.y = tuples[len(tuples)-1][1]
-	pdp.p.command <- cmd
 	return nil
 }
 
