@@ -3,6 +3,7 @@ package svg
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -80,7 +81,10 @@ func (l *Lexer) run() {
 	for state := lexD; state != nil; {
 		state = state(l)
 	}
-	l.Items <- Item{Type: ItemEOS}
+	select {
+	case l.Items <- Item{Type: ItemEOS}:
+	case <-time.After(time.Second):
+	}
 	close(l.Items) // No more tokens will be delivered.
 }
 
