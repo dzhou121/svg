@@ -43,6 +43,7 @@ type pathDescriptionParser struct {
 	lasttuple      Tuple
 	transform      Transform
 	svg            *Svg
+	x1, y1         float64
 	x2, y2         float64
 	initX, initY   float64
 }
@@ -96,6 +97,14 @@ func parseCommand(pdp *pathDescriptionParser, l *Lexer, i Item) error {
 		err = parseSCurveTo(pdp, true)
 	case "s":
 		err = parseSCurveTo(pdp, false)
+	case "Q":
+		err = parseQCurveTo(pdp, true)
+	case "q":
+		err = parseQCurveTo(pdp, false)
+	case "T":
+		err = parseTCurveTo(pdp, true)
+	case "t":
+		err = parseTCurveTo(pdp, false)
 	case "L":
 		err = parseLineTo(pdp, true)
 	case "l":
@@ -121,6 +130,10 @@ func parseCommand(pdp *pathDescriptionParser, l *Lexer, i Item) error {
 	if i.Value != "c" && i.Value != "C" && i.Value != "s" && i.Value != "S" {
 		pdp.x2 = pdp.x
 		pdp.y2 = pdp.y
+	}
+	if i.Value != "Q" && i.Value != "q" && i.Value != "T" && i.Value != "t" {
+		pdp.x1 = pdp.x
+		pdp.y1 = pdp.y
 	}
 	return err
 
@@ -273,6 +286,72 @@ func reflection(x, y, x2, y2 float64) Tuple {
 	return t
 }
 
+func parseQCurveTo(pdp *pathDescriptionParser, abs bool) error {
+	tuples, err := parseTuples(pdp)
+	if err != nil {
+		return err
+	}
+	for j := 0; j < len(tuples)/2; j++ {
+		if !abs {
+			for i := 2 * j; i < 2+2*j; i++ {
+				tuples[i][0] += pdp.x
+				tuples[i][1] += pdp.y
+			}
+		}
+		x1 := pdp.x + float64(2)/float64(3)*(tuples[0+2*j][0]-pdp.x)
+		y1 := pdp.y + float64(2)/float64(3)*(tuples[0+2*j][1]-pdp.y)
+		x2 := tuples[1+2*j][0] + float64(2)/float64(3)*(tuples[0+2*j][0]-tuples[1+2*j][0])
+		y2 := tuples[1+2*j][1] + float64(2)/float64(3)*(tuples[0+2*j][1]-tuples[1+2*j][1])
+		pdp.x = tuples[1+2*j][0]
+		pdp.y = tuples[1+2*j][1]
+		pdp.x1 = tuples[0+2*j][0]
+		pdp.y1 = tuples[0+2*j][1]
+		cmd := &Command{
+			Name: CURVETO,
+			Points: []Tuple{
+				pdp.transform.Apply(Tuple{x1, y1}),
+				pdp.transform.Apply(Tuple{x2, y2}),
+				pdp.transform.Apply(tuples[1+2*j]),
+			},
+		}
+		pdp.p.command <- cmd
+	}
+	return nil
+}
+
+func parseTCurveTo(pdp *pathDescriptionParser, abs bool) error {
+	tuples, err := parseTuples(pdp)
+	if err != nil {
+		return err
+	}
+	for j := 0; j < len(tuples); j++ {
+		if !abs {
+			tuples[j][0] += pdp.x
+			tuples[j][1] += pdp.y
+		}
+		end := tuples[j]
+		c1 := reflection(pdp.x, pdp.y, pdp.x1, pdp.y1)
+		x1 := pdp.x + float64(2)/float64(3)*(c1[0]-pdp.x)
+		y1 := pdp.y + float64(2)/float64(3)*(c1[1]-pdp.y)
+		x2 := end[0] + float64(2)/float64(3)*(c1[0]-end[0])
+		y2 := end[1] + float64(2)/float64(3)*(c1[1]-end[1])
+		pdp.x = tuples[j][0]
+		pdp.y = tuples[j][1]
+		pdp.x1 = c1[0]
+		pdp.y1 = c1[1]
+		cmd := &Command{
+			Name: CURVETO,
+			Points: []Tuple{
+				pdp.transform.Apply(Tuple{x1, y1}),
+				pdp.transform.Apply(Tuple{x2, y2}),
+				pdp.transform.Apply(tuples[j]),
+			},
+		}
+		pdp.p.command <- cmd
+	}
+	return nil
+}
+
 func parseSCurveTo(pdp *pathDescriptionParser, abs bool) error {
 	tuples, err := parseTuples(pdp)
 	if err != nil {
@@ -286,14 +365,15 @@ func parseSCurveTo(pdp *pathDescriptionParser, abs bool) error {
 				tuples[i][1] += pdp.y
 			}
 		}
-		pdp.x2 = tuples[0+2*j][0]
-		pdp.y2 = tuples[0+2*j][1]
+		c2 := reflection(pdp.x, pdp.y, tuples[0+2*j][0], tuples[0+2*j][1])
 		pdp.x = tuples[1+2*j][0]
 		pdp.y = tuples[1+2*j][1]
+		pdp.x2 = c2[0]
+		pdp.y2 = c2[1]
 		cmd := &Command{
 			Name: CURVETO,
 			Points: []Tuple{
-				pdp.transform.Apply(reflection(pdp.x, pdp.y, pdp.x2, pdp.y2)),
+				pdp.transform.Apply(c2),
 				pdp.transform.Apply(tuples[0+2*j]),
 				pdp.transform.Apply(tuples[1+2*j]),
 			},
